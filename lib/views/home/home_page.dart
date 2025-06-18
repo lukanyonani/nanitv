@@ -1,9 +1,10 @@
 // lib/screens/home_screen.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:get/get.dart';
-import 'dart:io';
+
 import '../../models/iptv_models.dart';
 import '../../providers/providers.dart';
 import '../../viewmodels/channel_viewmodel.dart';
@@ -32,11 +33,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
+    print('🚀 HomeScreen initState called');
     _pageController = PageController(viewportFraction: 0.8);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final cats = ref.read(homeViewModelProvider).categories;
       if (cats.isNotEmpty) {
+        print('🍿 Applying initial category filter: ${cats[0]}');
         ref.read(homeViewModelProvider).filterByCategory(cats[0]);
       }
     });
@@ -44,23 +47,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    print('🧹 HomeScreen dispose called');
     _pageController.dispose();
     super.dispose();
   }
 
   void _showCountryPicker() {
+    print('🌍 Showing country picker');
     showModalBottomSheet(
       context: context,
-      isScrollControlled:
-          true, // allow full-screen drag but we’ll bound it below
-      backgroundColor:
-          Colors.transparent, // transparent so our Container’s radius shows
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (context) {
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.4, // start at 40% of screen height
-          minChildSize: 0.2, // you can drag down to 20%
-          maxChildSize: 0.8, // you can drag up to 80%
+          initialChildSize: 0.4,
+          minChildSize: 0.2,
+          maxChildSize: 0.8,
           builder: (context, scrollController) {
             return Container(
               decoration: const BoxDecoration(
@@ -76,12 +79,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         valueColor: AlwaysStoppedAnimation(AppColors.accent),
                       ),
                     ),
-                    error: (e, _) => Center(
-                      child: Text(
-                        'Error: $e',
-                        style: const TextStyle(color: AppColors.textSecondary),
-                      ),
-                    ),
+                    error: (e, _) {
+                      print('❌ Country picker error: $e');
+                      return Center(
+                        child: Text(
+                          'Error: $e',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      );
+                    },
                     data: (countries) {
                       countries.sort((a, b) => a.name.compareTo(b.name));
                       return Column(
@@ -98,10 +106,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           const SizedBox(height: 12),
                           Expanded(
                             child: ListView.builder(
-                              controller:
-                                  scrollController, // IMPORTANT: hook up the controller
+                              controller: scrollController,
                               padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: countries.length, // no “+1”
+                              itemCount: countries.length,
                               itemBuilder: (context, idx) {
                                 final country = countries[idx];
                                 return ListTile(
@@ -121,6 +128,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     ),
                                   ),
                                   onTap: () {
+                                    print(
+                                      '🌐 Country selected: ${country.name}',
+                                    );
                                     Navigator.of(context).pop();
                                     setState(() {
                                       _chosenCountryCode = country.code;
@@ -150,6 +160,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    print('🔨 Building HomeScreen UI');
     final vm = ref.watch(homeViewModelProvider);
     final categories = vm.categories;
     final channelsAsync = vm.filteredChannels;
@@ -167,6 +178,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   _buildIconButton(
                     Icons.search,
                     onTap: () {
+                      print('🔍 Search button tapped');
                       Get.to(() => SearchScreen());
                     },
                   ),
@@ -218,9 +230,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   final isSel = idx == _selectedCategoryIndex;
                   return GestureDetector(
                     onTap: () {
+                      print('📑 Category tapped: $cat');
                       setState(() => _selectedCategoryIndex = idx);
                       ref.read(homeViewModelProvider).filterByCategory(cat);
-                      _pageController.jumpToPage(0);
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
@@ -261,72 +273,58 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Channel Carousel
+            // Channel Grid (2 columns!) 🎉
             Expanded(
-              child: Center(
-                child: SizedBox(
-                  height: 450,
-                  child: channelsAsync.when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (err, _) {
-                      // Detect network lookup failures
-                      if (err is SocketException) {
-                        return _buildNetworkError(() {
-                          // force Riverpod to re-fetch your filtered channels
-                          ref.refresh(homeViewModelProvider);
-                        });
-                      }
-                      // fallback for other errors
-                      return Center(
-                        child: Text(
-                          'Error: $err',
-                          style: const TextStyle(color: Colors.white70),
+              child: channelsAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (err, _) {
+                  print('❌ Channel load error: $err');
+                  if (err is SocketException) {
+                    return _buildNetworkError(
+                      () => ref.refresh(homeViewModelProvider),
+                    );
+                  }
+                  return Center(
+                    child: Text(
+                      'Error: $err',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  );
+                },
+                data: (channels) {
+                  print('🔎 Displaying ${channels.length} channels in grid');
+                  if (channels.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'No channels in this category',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    );
+                  }
+                  return GridView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 16,
+                          childAspectRatio: 0.75,
                         ),
+                    itemCount: channels.length,
+                    itemBuilder: (context, index) {
+                      final channel = channels[index];
+                      print('➡️ Building grid item for: ${channel.name}');
+                      return _buildGridChannelCard(
+                        channel,
+                        index,
+                        channels.length,
                       );
                     },
-                    data: (channels) {
-                      if (channels.isEmpty) {
-                        return const Center(
-                          child: Text(
-                            'No channels in this category',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        );
-                      }
-                      return PageView.builder(
-                        controller: _pageController,
-                        onPageChanged: (idx) =>
-                            setState(() => _currentPage = idx),
-                        itemCount: channels.length,
-                        itemBuilder: (context, index) {
-                          final channel = channels[index];
-                          return AnimatedBuilder(
-                            animation: _pageController,
-                            builder: (context, child) {
-                              double value = 0;
-                              if (_pageController.position.haveDimensions) {
-                                value = index - (_pageController.page ?? 0);
-                                value = (value * 0.038).clamp(-1, 1);
-                              }
-                              return Transform.rotate(
-                                angle: value,
-                                child: Transform.scale(
-                                  scale: 1 - (value.abs() * 0.15),
-                                  child: _buildCarouselChannelCard(
-                                    channel,
-                                    index,
-                                    channels.length,
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
+                  );
+                },
               ),
             ),
           ],
@@ -342,7 +340,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         children: [
           Icon(Icons.cloud_off, color: Colors.white54, size: 80),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'No internet connection',
             style: TextStyle(
               color: Colors.white70,
@@ -351,7 +349,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'Please check your network and try again.',
             style: TextStyle(color: Colors.white54),
           ),
@@ -366,24 +364,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Widget _buildCarouselChannelCard(Channel channel, int index, int total) {
-    final channelDetailViewModel = ref.watch(
-      channelDetailViewModelProvider(channel.id),
-    );
-    final streams = channelDetailViewModel.streams;
-
+  Widget _buildGridChannelCard(Channel channel, int index, int total) {
     return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChannelPlayerScreen(
+      onTap: () {
+        print('▶️ Channel tapped: ${channel.name}');
+        Get.to(
+          () => ChannelPlayerScreen(
             channelId: channel.id,
             channelName: channel.name,
           ),
-        ),
-      ),
+        );
+      },
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
           color: const Color(0xFF1A1F2E),
@@ -396,35 +388,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ],
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Logo or gradient
+            // 📸 Logo / Gradient placeholder
             Expanded(
               child: ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(20),
                 ),
                 child: channel.hasLogo
-                    ? CachedNetworkImage(
-                        imageUrl: channel.logo!,
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.contain,
-                        placeholder: (context, url) => Container(
-                          color: Colors.black,
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                              color: Colors.white54,
-                            ),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          //color: const Color.fromARGB(255, 29, 36, 58),
-                          child: const Center(
+                    ? Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: CachedNetworkImage(
+                          imageUrl: channel.logo!,
+                          fit: BoxFit.contain,
+                          placeholder: (c, u) =>
+                              const Center(child: CircularProgressIndicator()),
+                          errorWidget: (c, u, e) => const Center(
                             child: Icon(
-                              size: 120,
                               Icons.broken_image,
+                              size: 60,
                               color: Colors.white54,
                             ),
                           ),
@@ -442,78 +425,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Info area
-            Expanded(
-              flex: 1,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
+            // ℹ️ Info area
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    channel.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  if (channel.primaryCategory != null)
                     Text(
-                      channel.name,
+                      channel.primaryCategory!.toUpperCase(),
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w600,
+                        color: Colors.white54,
+                        fontSize: 12,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
-                    if (channel.primaryCategory != null)
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.live_tv,
+                        color: index == _currentPage
+                            ? AppColors.accent
+                            : Colors.white54,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
                       Text(
-                        channel.primaryCategory!.toUpperCase(),
+                        '${index + 1}/$total',
                         style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 14,
+                          color: Colors.white70,
+                          fontSize: 12,
                         ),
                       ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.live_tv,
-                          color: index == _currentPage
-                              ? AppColors.accent
-                              : Colors.white54,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${index + 1}/$total Channel',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                        //Loaded ${streamList.length} streams
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.video_library_outlined,
-                          color: index == _currentPage
-                              ? AppColors.accent
-                              : Colors.white54,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${streams.value?.length ?? 0} Stream',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                        //Loaded ${streamList.length} streams
-                      ],
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
@@ -524,7 +481,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _buildIconButton(IconData icon, {required VoidCallback onTap}) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        print('🔘 Icon button tapped: $icon');
+        onTap();
+      },
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(

@@ -8,6 +8,7 @@ import 'views/splashscreen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  print('🌱 Initializing NaniTV...');
 
   // Lock device orientation to portrait only
   await SystemChrome.setPreferredOrientations([
@@ -27,13 +28,17 @@ class NaniTVApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    print('building NaniTV...');
     return GetMaterialApp(
       // 🔁 GetX-powered navigation
       debugShowCheckedModeBanner: false,
-      title: 'NaniTV',
-      theme: ThemeData.dark().copyWith(
+      darkTheme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: AppColors.background,
       ),
+      title: 'NaniTV',
+      // theme: ThemeData.dark().copyWith(
+      //   scaffoldBackgroundColor: AppColors.background,
+      // ),
       home: SplashScreen(),
     );
   }
