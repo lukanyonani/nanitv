@@ -28,7 +28,7 @@ class NaniTVApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    print('building NaniTV...');
+    print('🔁 building NaniTV...');
     return GetMaterialApp(
       // 🔁 GetX-powered navigation
       debugShowCheckedModeBanner: false,
@@ -36,9 +36,6 @@ class NaniTVApp extends StatelessWidget {
         scaffoldBackgroundColor: AppColors.background,
       ),
       title: 'NaniTV',
-      // theme: ThemeData.dark().copyWith(
-      //   scaffoldBackgroundColor: AppColors.background,
-      // ),
       home: SplashScreen(),
     );
   }
