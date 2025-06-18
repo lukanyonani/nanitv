@@ -3,7 +3,6 @@ import 'package:get/get.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'utils/colors.dart';
 import 'package:flutter/services.dart';
-
 import 'views/splashscreen.dart';
 
 void main() async {

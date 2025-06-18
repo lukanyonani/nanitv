@@ -55,10 +55,10 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
 
     // Lock orientation to landscape for immersive viewing
     SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
+      DeviceOrientation.portraitUp,
+      // DeviceOrientation.landscapeLeft,
+      // DeviceOrientation.landscapeRight,
     ]);
-    print('📐 [PlayerScreen] -> Orientation locked to landscape');
 
     // Wait until build completes then initialize the first stream
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -76,9 +76,9 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
     // Restore all orientations
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
+      // DeviceOrientation.portraitDown,
+      // DeviceOrientation.landscapeLeft,
+      // DeviceOrientation.landscapeRight,
     ]);
     print('📐 [PlayerScreen] -> Orientation restored');
 
