@@ -1,0 +1,149 @@
+# IPTV Flutter App — Technical Documentation
+
+## Overview
+
+This Flutter application integrates the IPTV-ORG API to display and play live TV streams. It follows the MVVM (Model-View-ViewModel) pattern and uses Riverpod for state management, `http` for networking, and `video_player` (+ optional `chewie`) for playback.
+
+### Key Features
+
+* Fetch channel, feed, stream, guide, and taxonomy data.
+* Filter and list available streams.
+* Play selected HLS (`.m3u8`) streams with proper HTTP headers.
+* Clean separation of data, business logic, and UI via MVVM.
+
+---
+
+## Architecture & MVVM Pattern
+
+```
+lib/
+├── main.dart
+├── models/
+│   ├── channel.dart
+│   ├── feed.dart
+│   ├── stream_info.dart
+│   ├── guide.dart
+│   ├── taxonomy/    # category, language, country, subdivision, region, timezone, blocklist
+│   └── ...
+├── services/
+│   └── iptv_api_service.dart
+├── viewmodels/
+│   ├── channels_viewmodel.dart
+│   ├── streams_viewmodel.dart
+│   └── ...
+├── views/
+│   ├── screens/
+│   │   ├── home_screen.dart
+│   │   ├── streams_list_screen.dart
+│   │   └── player_screen.dart
+│   └── widgets/
+│       └── streams_list_widget.dart
+└── utils/
+    └── date_formatters.dart
+```
+
+### Components
+
+| Layer         | Responsibility                                                                | Packages / Tools          |
+| ------------- | ----------------------------------------------------------------------------- | ------------------------- |
+| **Model**     | Data structures matching API JSON.                                            | Plain Dart classes        |
+| **Service**   | HTTP client logic to fetch JSON and parse into Models.                        | `http`, custom parser     |
+| **ViewModel** | Exposes reactive state (data + loading/error) via Riverpod.                   | `flutter_riverpod`        |
+| **View**      | UI: Widgets and Screens that consume ViewModels, render lists, playback, etc. | `flutter`, `video_player` |
+| **Utils**     | Shared helpers (e.g. date formatting, validation).                            | Plain Dart functions      |
+
+---
+
+## File-by-File Explanation
+
+### `main.dart`
+
+* **Entrypoint**: Initializes Riverpod (`ProviderScope`) and sets up `MaterialApp`.
+* **Routes**: Defines named routes or `onGenerateRoute` for navigation.
+
+### `models/` folder
+
+* **channel.dart**: `Channel` class with fields like `id`, `name`, `country`, `categories`, `launched`, etc.
+* **feed.dart**: `Feed` class mapping `feeds.json` (fields: `channel`, `id`, `isMain`, `languages`, `timezones`).
+* **stream\_info.dart**: `StreamInfo` class for `streams.json` with `url`, `referrer`, `userAgent`, `quality`.
+* **guide.dart**: `Guide` class for EPG mapping (`site`, `siteId`, `lang`).
+* **taxonomy/\`**: Models for categories, languages, countries, subdivisions, regions, timezones, blocklist items.
+
+### `services/iptv_api_service.dart`
+
+* **`IptvApiService`**: Singleton-style class wrapping all HTTP calls to `.json` endpoints.
+* **Generic \*\*\*\*`_getList<T>()`**: Internal helper to GET a JSON array and map to `T` using provided factory.
+* **Riverpod Provider**: Exposes `iptvApiServiceProvider` plus `FutureProvider`s for each endpoint (channels, streams, etc.).
+
+### `viewmodels/` folder
+
+* **`channels_viewmodel.dart`**:
+
+  * Watches `channelsProvider`.
+  * Exposes `AsyncValue<List<Channel>> channels`.
+  * Provides filter/computation methods (e.g. activeOnly, byCountry).
+
+* **`streams_viewmodel.dart`**:
+
+  * Watches `streamsProvider`.
+  * Exposes `AsyncValue<List<StreamInfo>> streams`.
+  * Offers selection logic (e.g. pick highest-quality, headers).
+
+* **Additional ViewModels (optional)**:
+
+  * `feeds_viewmodel.dart`, `guides_viewmodel.dart`, etc.
+
+### `views/screens/` folder
+
+* **`home_screen.dart`**: Landing page; tabs or drawer to navigate between lists (channels, streams).
+* **`streams_list_screen.dart`**: Wraps `StreamsListWidget`; provides search bar and filter controls.
+* **`player_screen.dart`**: Renders `VideoPlayer` (or `Chewie`) initialized with selected stream’s URL and headers.
+
+### `views/widgets/` folder
+
+* **`streams_list_widget.dart`**: `ConsumerWidget` that reads `streamsViewModel.streams` and builds a `ListView` of tiles.
+* **Filter Widgets**: Dropdowns, switches to adjust `ViewModel` filter parameters.
+
+### `utils/date_formatters.dart`
+
+* Helpers for parsing and formatting API date strings (e.g. `YYYY-MM-DD` → `dd MMM yyyy`).
+
+---
+
+## Dependency Graph
+
+```mermaid
+graph LR;
+  main --> HomeScreen;
+  HomeScreen --> StreamsListScreen;
+  StreamsListScreen --> StreamsListWidget;
+  StreamsListWidget --> StreamsViewModel;
+  StreamsViewModel --> streamsProvider;
+  streamsProvider --> IptvApiService;
+  IptvApiService --> API Endpoints;
+  StreamsListWidget --> Navigator.PlayerScreen;
+  PlayerScreen --> video_player;
+```
+
+## MVVM Data Flow
+
+1. **View** (`StreamsListScreen`) mounts → reads `streamsProvider` via `StreamsViewModel`.
+2. Riverpod triggers `IptvApiService.fetchStreams()` → HTTP GET → JSON decode → `StreamInfo` list.
+3. `FutureProvider` updates to `AsyncValue.data(streams)`.
+4. **View** rebuilds, showing list; user taps an item.
+5. **View** calls Navigator → **PlayerScreen**, passing `StreamInfo`.
+6. **PlayerScreen** uses `video_player` to play URL with headers.
+
+---
+
+### Testing Strategy
+
+* **Unit Tests**: Mock `http.Client` in `IptvApiService` tests; verify parsing logic.
+* **Widget Tests**: Use `ProviderScope(overrides: ...)` to inject fake data into `streamsProvider`; ensure `StreamsListWidget` renders list.
+* **Integration**: Run through emulator/device to verify network calls and playback.
+
+---
+
+This documentation should give you a complete blueprint to develop, maintain, and extend the IPTV Flutter app with clear MVVM separation and Riverpod-powered reactivity.
+
+make pdf

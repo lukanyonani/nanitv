@@ -1,0 +1,35 @@
+name: freetv
+description: "A new Flutter project."
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  cached_network_image: ^3.4.1
+  chewie: ^1.11.3
+  flutter:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.4
+  flutter_riverpod: ^2.6.1
+  get: ^4.7.2
+  http: ^1.4.0
+  video_player: ^2.10.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  change_app_package_name: ^1.4.0
+
+flutter_icons:
+  android: true # generate for Android
+  ios: true # generate for iOS (App Store)
+  path: "assets/nani.png" # your source icon (prefer 1024×1024px)
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/
