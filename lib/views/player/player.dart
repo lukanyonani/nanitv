@@ -4,12 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get/get.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../models/iptv_models.dart';
 import '../../providers/providers.dart';
 import '../../utils/colors.dart';
 import '../../viewmodels/channel_viewmodel.dart';
 import '../../viewmodels/player_viewmodel.dart';
-import '../home/home_page.dart';
 
 class ChannelPlayerScreen extends ConsumerStatefulWidget {
   final String channelId;
@@ -33,6 +33,7 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
   String? _currentStreamUrl;
   StreamInfo? _selectedStream;
   int _retryCount = 0;
+
   static const int _maxRetries = 3;
   static const Duration _initializationTimeout = Duration(seconds: 30);
 
@@ -40,23 +41,26 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
   void initState() {
     super.initState();
     print(
-      '🎬 [PlayerScreen] Initializing player screen for channel: ${widget.channelName}',
+      '🎬 [PlayerScreen] -> initState: Starting up for channel "${widget.channelName}"',
     );
 
-    // Ensure a clean slate by disposing any existing player
+    // Keep the screen awake while video is playing
+    WakelockPlus.enable();
+    print('🔒 [PlayerScreen] -> Wakelock enabled');
+
+    // Reset any previous player state
     _disposePlayer(notify: false);
-
-    // Reset the PlayerViewModel to clear any stale state
     ref.read(playerViewModelProvider.notifier).reset();
+    print('🧹 [PlayerScreen] -> Cleared old player and reset ViewModel');
 
-    // Lock orientation to landscape for better viewing experience
+    // Lock orientation to landscape for immersive viewing
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp,
     ]);
+    print('📐 [PlayerScreen] -> Orientation locked to landscape');
 
-    // Initialize the player with the first available stream
+    // Wait until build completes then initialize the first stream
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeFirstStream();
     });
@@ -64,64 +68,58 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
 
   @override
   void dispose() {
-    print('🧹 [PlayerScreen] Disposing player screen');
+    print('🧹 [PlayerScreen] -> dispose: Cleaning up resources');
     _disposePlayer(notify: false);
+    WakelockPlus.disable();
+    print('🔓 [PlayerScreen] -> Wakelock disabled');
 
-    // Reset orientation
+    // Restore all orientations
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
+    print('📐 [PlayerScreen] -> Orientation restored');
+
     super.dispose();
   }
 
-  /// Completely tears down any existing player so a fresh one can be built.
+  /// Tear down the player controllers and reset state
   void _disposePlayer({bool notify = true}) {
-    print('🧹 [PlayerScreen] Disposing player resources');
-    // Remove listener if present
-    if (_videoPlayerController != null) {
-      _videoPlayerController!.removeListener(_onVideoPlayerChange);
-    }
-
-    // Pause and dispose controllers
+    print('🧹 [PlayerScreen] -> _disposePlayer: Disposing video controllers');
+    _videoPlayerController?.removeListener(_onVideoPlayerChange);
     _videoPlayerController?.pause();
     _chewieController?.dispose();
     _videoPlayerController?.dispose();
 
-    // Clear fields
-    _chewieController = null;
     _videoPlayerController = null;
+    _chewieController = null;
     _isPlayerInitialized = false;
     _currentStreamUrl = null;
     _selectedStream = null;
     _retryCount = 0;
 
-    // Notify UI if requested and mounted
-    if (notify && mounted) {
-      setState(() {});
-    }
+    if (notify && mounted) setState(() {});
   }
 
   bool _isValidStreamUrl(String url) {
-    print('🔍 [PlayerScreen] Validating stream URL: $url');
+    print('🔍 [PlayerScreen] -> Validating URL: $url');
     if (url.isEmpty) {
-      print('❌ [PlayerScreen] URL is empty');
+      print('❌ [PlayerScreen] -> URL is empty');
       return false;
     }
-
     try {
       final uri = Uri.parse(url);
       if (!uri.hasScheme ||
-          (!uri.scheme.startsWith('http') && !uri.scheme.startsWith('rtmp'))) {
-        print('❌ [PlayerScreen] Invalid URL scheme: ${uri.scheme}');
+          !(uri.scheme.startsWith('http') || uri.scheme.startsWith('rtmp'))) {
+        print('❌ [PlayerScreen] -> Invalid scheme: ${uri.scheme}');
         return false;
       }
-      print('✅ [PlayerScreen] URL validation passed');
+      print('✅ [PlayerScreen] -> URL looks good');
       return true;
     } catch (e) {
-      print('❌ [PlayerScreen] URL parsing failed: $e');
+      print('❌ [PlayerScreen] -> URL parse error: $e');
       return false;
     }
   }
@@ -145,9 +143,9 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
   }
 
   Future<void> _initializePlayer(StreamInfo stream) async {
-    print('🚀 [PlayerScreen] Initializing stream: ${stream.url}');
+    print('🚀 [PlayerScreen] -> Initializing stream: ${stream.url}');
     if (_retryCount >= _maxRetries) {
-      print('❌ [PlayerScreen] Max retries reached ($_maxRetries)');
+      print('❌ [PlayerScreen] -> Reached max retries ($_maxRetries)');
       ref
           .read(playerViewModelProvider.notifier)
           .setError('Max retries reached');
@@ -156,35 +154,33 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
 
     _disposePlayer(notify: false);
     _retryCount++;
-
-    final playerViewModel = ref.read(playerViewModelProvider.notifier);
-    playerViewModel.setStream(stream);
-    playerViewModel.setLoading(true);
+    final vm = ref.read(playerViewModelProvider.notifier);
+    vm.setStream(stream);
+    vm.setLoading(true);
 
     try {
       if (!_isValidStreamUrl(stream.url)) {
-        throw Exception('Invalid stream URL: ${stream.url}');
+        throw Exception('Invalid stream URL');
       }
 
-      print('🔧 Creating VideoPlayerController...');
       _videoPlayerController = VideoPlayerController.networkUrl(
         Uri.parse(stream.url),
         httpHeaders: stream.httpHeaders,
       );
+      print('🔧 [PlayerScreen] -> VideoPlayerController created');
 
-      print('⏳ Initializing (timeout ${_initializationTimeout.inSeconds}s)...');
       await _videoPlayerController!.initialize().timeout(
         _initializationTimeout,
         onTimeout: () {
           throw Exception('Initialization timed out');
         },
       );
+      print('⏳ [PlayerScreen] -> Controller initialized');
 
       if (_videoPlayerController!.value.hasError) {
         throw Exception(_videoPlayerController!.value.errorDescription);
       }
 
-      print('🎮 Creating ChewieController...');
       _chewieController = ChewieController(
         videoPlayerController: _videoPlayerController!,
         autoPlay: true,
@@ -195,10 +191,11 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
         errorBuilder: (ctx, err) {
           final msg = _getUserFriendlyError(err);
           return Center(
-            child: Text(msg, style: const TextStyle(color: Colors.white)),
+            child: Text(msg, style: TextStyle(color: Colors.white)),
           );
         },
       );
+      print('🎮 [PlayerScreen] -> ChewieController configured');
 
       _videoPlayerController!.addListener(_onVideoPlayerChange);
 
@@ -207,142 +204,79 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
         _currentStreamUrl = stream.url;
         _selectedStream = stream;
       });
-      playerViewModel.setLoading(false);
-      playerViewModel.setPlaying(true);
-      _retryCount = 0; // Reset retry count on success
-      print('🎉 Player ready!');
-    } catch (e, st) {
-      final errorText = e.toString();
-      print('💥 Initialization failed: $errorText');
-      print(st);
-
-      if (errorText.contains('Response code: 404')) {
-        print('🔍 [PlayerScreen] Stream returned 404—trying next stream');
-        _disposePlayer(notify: false);
-        _tryNextStream();
-        return;
-      }
-
+      vm.setLoading(false);
+      vm.setPlaying(true);
+      _retryCount = 0;
+      print('🎉 [PlayerScreen] -> Stream is now playing');
+    } catch (e) {
+      final errText = e.toString();
+      print('💥 [PlayerScreen] -> Init failed: $errText');
       _disposePlayer();
-      final friendly = _getUserFriendlyError(errorText);
-      playerViewModel.setError(friendly);
-      playerViewModel.setLoading(false);
+      final friendly = _getUserFriendlyError(errText);
+      vm.setError(friendly);
+      vm.setLoading(false);
     }
   }
 
   void _onVideoPlayerChange() {
     if (_videoPlayerController?.value.hasError == true) {
-      final error = _videoPlayerController!.value.errorDescription;
-      print('📹 [PlayerScreen] Video player error detected: $error');
-      final playerViewModel = ref.read(playerViewModelProvider.notifier);
-      playerViewModel.setError(_getUserFriendlyError(error ?? 'Unknown error'));
+      final e = _videoPlayerController!.value.errorDescription;
+      print('📹 [PlayerScreen] -> Player error: $e');
+      ref
+          .read(playerViewModelProvider.notifier)
+          .setError(_getUserFriendlyError(e ?? 'Unknown error'));
     }
   }
 
   void _initializeFirstStream() {
-    final channelDetailViewModel = ref.read(
+    final detailsVm = ref.read(
       channelDetailViewModelProvider(widget.channelId),
     );
-
-    channelDetailViewModel.streams.when(
-      data: (streamList) {
-        if (streamList.isNotEmpty) {
+    detailsVm.streams.when(
+      data: (list) {
+        if (list.isNotEmpty) {
           print(
-            '🎯 [PlayerScreen] Initializing first stream: ${streamList.first.url}',
+            '🎯 [PlayerScreen] -> First available stream: ${list.first.url}',
           );
-          _initializePlayer(streamList.first);
+          _initializePlayer(list.first);
         } else {
-          print('❌ [PlayerScreen] No streams available for initialization');
+          print('❌ [PlayerScreen] -> No streams found');
         }
       },
-      loading: () => print('⏳ [PlayerScreen] Waiting for streams to load...'),
-      error: (error, stack) =>
-          print('❌ [PlayerScreen] Error loading streams: $error'),
-    );
-  }
-
-  void _tryNextStream() {
-    print('🔄 [PlayerScreen] Trying to find next available stream...');
-    final channelDetailViewModel = ref.read(
-      channelDetailViewModelProvider(widget.channelId),
-    );
-
-    channelDetailViewModel.streams.when(
-      data: (streamList) {
-        if (streamList.isEmpty) {
-          print('❌ [PlayerScreen] No streams available');
-          return;
-        }
-
-        int currentIndex = -1;
-        if (_selectedStream != null) {
-          currentIndex = streamList.indexWhere(
-            (s) => s.url == _selectedStream!.url,
-          );
-        }
-
-        int nextIndex = (currentIndex + 1) % streamList.length;
-        if (nextIndex == currentIndex) {
-          print('❌ [PlayerScreen] No other streams available to try');
-          return;
-        }
-
-        final nextStream = streamList[nextIndex];
-        print('🎯 [PlayerScreen] Trying next stream: ${nextStream.url}');
-        _initializePlayer(nextStream);
-      },
-      loading: () => print('⏳ [PlayerScreen] Streams still loading...'),
-      error: (error, stack) =>
-          print('❌ [PlayerScreen] Error loading streams: $error'),
+      loading: () => print('⏳ [PlayerScreen] -> Loading streams...'),
+      error: (e, _) => print('❌ [PlayerScreen] -> Stream load error: $e'),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final channelDetailViewModel = ref.watch(
-      channelDetailViewModelProvider(widget.channelId),
-    );
-    final channelDetails = channelDetailViewModel.channelDetails;
-    final streams = channelDetailViewModel.streams;
-    final playerState = ref.watch(playerViewModelProvider);
+    final channelDetails = ref
+        .watch(channelDetailViewModelProvider(widget.channelId))
+        .channelDetails;
+    final streams = ref
+        .watch(channelDetailViewModelProvider(widget.channelId))
+        .streams;
+    final state = ref.watch(playerViewModelProvider);
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          Get.back();
-          ref
-              .read(playerViewModelProvider.notifier)
-              .reset(); // Reset on navigation
-        }
+        if (!didPop) Get.back();
+        ref.read(playerViewModelProvider.notifier).reset();
       },
       child: Scaffold(
         backgroundColor: Colors.black,
         appBar: AppBar(
           title: Text(
             widget.channelName,
-            style: const TextStyle(color: Colors.white),
+            style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.black87,
-          iconTheme: const IconThemeData(color: Colors.white),
+          iconTheme: IconThemeData(color: Colors.white),
           actions: [
             IconButton(
-              icon: const Icon(Icons.info_outline),
+              icon: Icon(Icons.info_outline),
               onPressed: () => _showChannelInfo(context, channelDetails),
-            ),
-            if (_selectedStream != null)
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                onPressed: () {
-                  print('🔄 [PlayerScreen] Manual refresh requested');
-                  _retryCount = 0;
-                  _initializePlayer(_selectedStream!);
-                },
-              ),
-            IconButton(
-              icon: const Icon(Icons.skip_next),
-              onPressed: _tryNextStream,
-              tooltip: 'Try Next Stream',
             ),
           ],
         ),
@@ -352,29 +286,21 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
               aspectRatio: 16 / 9,
               child: Container(
                 color: Colors.black,
-                child: _buildVideoPlayer(playerState),
+                child: _buildVideoPlayer(state),
               ),
             ),
             Expanded(
               child: Container(
                 color: Colors.grey.shade900,
                 child: streams.when(
-                  data: (streamList) {
-                    print(
-                      '📊 [PlayerScreen] Loaded ${streamList.length} streams',
-                    );
-                    return _buildStreamControls(streamList);
+                  data: (list) {
+                    print('📊 [PlayerScreen] -> ${list.length} streams loaded');
+                    return _buildStreamControls(list);
                   },
-                  loading: () {
-                    print('⏳ [PlayerScreen] Loading streams...');
-                    return const Center(
-                      child: CircularProgressIndicator(color: Colors.white),
-                    );
-                  },
-                  error: (error, stack) {
-                    print('❌ [PlayerScreen] Error loading streams: $error');
-                    return _buildErrorWidget('Failed to load streams');
-                  },
+                  loading: () => Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                  error: (e, _) => _buildErrorWidget('Failed to load streams'),
                 ),
               ),
             ),
@@ -384,73 +310,45 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
     );
   }
 
-  Widget _buildVideoPlayer(PlayerState playerState) {
-    if (playerState.isLoading) {
-      print('⏳ [PlayerScreen] Showing loading state');
+  Widget _buildVideoPlayer(PlayerState state) {
+    if (state.isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(color: Colors.white),
-            const SizedBox(height: 16),
+            CircularProgressIndicator(color: Colors.white),
+            SizedBox(height: 12),
             Text(
-              _retryCount > 0
-                  ? 'Loading... (${_retryCount}/$_maxRetries)'
+              state.error != null
+                  ? 'Retrying... ($_retryCount/$_maxRetries)'
                   : 'Loading stream...',
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: Colors.white),
             ),
-            if (_selectedStream != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Quality: ${_selectedStream!.quality ?? 'Unknown'}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-            ],
           ],
         ),
       );
     }
 
-    if (playerState.error != null) {
-      print('❌ [PlayerScreen] Showing error state: ${playerState.error}');
+    if (state.error != null) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error, color: Colors.red, size: 60),
-            const SizedBox(height: 16),
+            Icon(Icons.error, color: Colors.red, size: 60),
+            SizedBox(height: 16),
             Text(
-              playerState.error!,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-              textAlign: TextAlign.center,
+              state.error!,
+              style: TextStyle(color: Colors.white, fontSize: 18),
             ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: _selectedStream != null
-                      ? () {
-                          print('🔄 [PlayerScreen] Manual retry requested');
-                          _retryCount = 0;
-                          _initializePlayer(_selectedStream!);
-                        }
-                      : null,
-                  child: const Text('Retry'),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton(
-                  onPressed: _tryNextStream,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                  ),
-                  child: const Text('Next Stream'),
-                ),
-              ],
+            SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _selectedStream != null
+                  ? () {
+                      _retryCount = 0;
+                      _initializePlayer(_selectedStream!);
+                    }
+                  : null,
+              child: Text('Retry'),
             ),
           ],
         ),
@@ -458,160 +356,88 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
     }
 
     if (_isPlayerInitialized && _chewieController != null) {
-      print('▶️ [PlayerScreen] Showing initialized player');
       return Chewie(controller: _chewieController!);
     }
 
-    print('💤 [PlayerScreen] Showing default state');
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.play_circle_outline, color: Colors.white54, size: 80),
           SizedBox(height: 16),
           Text(
-            'Select a stream to start playing',
-            style: TextStyle(color: Colors.white70, fontSize: 16),
+            'Select a stream to play',
+            style: TextStyle(color: Colors.white70),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStreamControls(List<StreamInfo> streamList) {
-    if (streamList.isEmpty) {
-      print('📺 [PlayerScreen] No streams available');
-      return const Center(
+  Widget _buildStreamControls(List<StreamInfo> list) {
+    if (list.isEmpty) {
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.tv_off, color: Colors.white54, size: 60),
             SizedBox(height: 16),
             Text(
-              'No streams available for this channel',
-              style: TextStyle(color: Colors.white70, fontSize: 16),
+              'No streams available',
+              style: TextStyle(color: Colors.white70),
             ),
           ],
         ),
       );
     }
 
-    final qualityGroups = <String, List<StreamInfo>>{};
-    for (final stream in streamList) {
-      final quality = stream.quality ?? 'Unknown';
-      qualityGroups.putIfAbsent(quality, () => []).add(stream);
-    }
-
-    print(
-      '📊 [PlayerScreen] Stream quality groups: ${qualityGroups.keys.toList()}',
-    );
-
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.stream, color: Colors.white),
-              const SizedBox(width: 8),
+              Icon(Icons.stream, color: Colors.white),
+              SizedBox(width: 8),
               Text(
-                'Available Streams (${streamList.length})',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                'Available Streams (${list.length})',
+                style: TextStyle(color: Colors.white, fontSize: 18),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          if (qualityGroups.length > 1) ...[
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: qualityGroups.keys.map((quality) {
-                  final isSelected = _selectedStream?.quality == quality;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text(
-                        '$quality (${qualityGroups[quality]!.length})',
-                      ),
-                      selected: isSelected,
-                      onSelected: (selected) {
-                        if (selected && qualityGroups[quality]!.isNotEmpty) {
-                          print(
-                            '🎯 [PlayerScreen] Quality filter selected: $quality',
-                          );
-                          _initializePlayer(qualityGroups[quality]!.first);
-                        }
-                      },
-                      selectedColor: Colors.blue,
-                      backgroundColor: Colors.grey.shade700,
-                      labelStyle: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white70,
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          ...streamList.asMap().entries.map((entry) {
-            final index = entry.key;
-            final stream = entry.value;
-            final isSelected = _currentStreamUrl == stream.url;
-            final isPlaying = isSelected && _isPlayerInitialized;
-
+          SizedBox(height: 12),
+          ...list.asMap().entries.map((e) {
+            final idx = e.key;
+            final info = e.value;
+            final isSel = _currentStreamUrl == info.url;
             return Card(
-              color: isSelected ? Colors.blue.shade800 : Colors.grey.shade800,
-              margin: const EdgeInsets.only(bottom: 8),
+              color: isSel ? Colors.blue.shade800 : Colors.grey.shade800,
+              margin: EdgeInsets.only(bottom: 8),
               child: ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: isSelected
-                      ? Colors.blue
-                      : Colors.grey.shade600,
+                  backgroundColor: isSel ? Colors.blue : Colors.grey.shade700,
                   child: Text(
-                    '${index + 1}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    '${idx + 1}',
+                    style: TextStyle(color: Colors.white),
                   ),
                 ),
                 title: Text(
-                  stream.quality ?? 'Unknown Quality',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  info.quality ?? 'Unknown',
+                  style: TextStyle(color: Colors.white),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isPlaying)
-                      const Icon(
-                        Icons.play_arrow,
-                        color: Colors.green,
-                        size: 20,
-                      ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      isSelected
-                          ? Icons.radio_button_checked
-                          : Icons.radio_button_unchecked,
-                      color: isSelected ? Colors.blue : Colors.white54,
-                    ),
-                  ],
+                trailing: Icon(
+                  isSel
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: isSel ? Colors.blue : Colors.white54,
                 ),
                 onTap: () {
-                  print('🎯 [PlayerScreen] Stream selected: ${stream.url}');
-                  print('📊 [PlayerScreen] Stream quality: ${stream.quality}');
+                  print(
+                    '🎯 [PlayerScreen] -> User selected stream #${idx + 1}',
+                  );
                   _retryCount = 0;
-                  _initializePlayer(stream);
+                  _initializePlayer(info);
                 },
               ),
             );
@@ -624,13 +450,13 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
   Widget _buildErrorWidget(String message) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(16),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error, color: Colors.red, size: 60),
-            const SizedBox(height: 16),
-            const Text(
+            Icon(Icons.error, color: Colors.red, size: 60),
+            SizedBox(height: 16),
+            Text(
               'Error',
               style: TextStyle(
                 color: Colors.white,
@@ -638,10 +464,10 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Text(
               message,
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: Colors.white70),
               textAlign: TextAlign.center,
             ),
           ],
@@ -650,30 +476,25 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
     );
   }
 
-  void _showChannelInfo(
-    BuildContext context,
-    AsyncValue<ChannelDetails> channelDetails,
-  ) {
+  void _showChannelInfo(BuildContext ctx, AsyncValue<ChannelDetails> details) {
     showModalBottomSheet(
-      context: context,
-      barrierColor: AppColors.overlay, // semi‐opaque dimmer
+      context: ctx,
+      barrierColor: AppColors.overlay,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent, // let our Container define everything
-      builder: (context) => DraggableScrollableSheet(
+      builder: (_) => DraggableScrollableSheet(
         initialChildSize: 0.5,
-        maxChildSize: 0.8,
         minChildSize: 0.3,
-        builder: (context, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: AppColors.surface, // dark panel
+        maxChildSize: 0.8,
+        builder: (c, ctrl) => Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
             children: [
-              // accent‐colored drag handle
               Container(
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                margin: EdgeInsets.symmetric(vertical: 12),
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
@@ -681,54 +502,48 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-
               Expanded(
-                child: channelDetails.when(
-                  loading: () => const Center(
+                child: details.when(
+                  loading: () => Center(
                     child: CircularProgressIndicator(
                       valueColor: AlwaysStoppedAnimation(AppColors.accent),
                     ),
                   ),
-                  error: (e, st) => Center(
+                  error: (e, _) => Center(
                     child: Text(
                       'Failed to load channel details',
-                      style: const TextStyle(color: AppColors.textSecondary),
+                      style: TextStyle(color: AppColors.textSecondary),
                     ),
                   ),
-                  data: (details) => ListView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
+                  data: (d) => ListView(
+                    controller: ctrl,
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     children: [
                       Text(
-                        details.channel.name,
-                        style: const TextStyle(
+                        d.channel.name,
+                        style: TextStyle(
                           color: AppColors.textPrimary,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 16),
-
-                      // Info rows in Cards
-                      _infoCard('Country', details.channel.country),
-                      if (details.channel.network != null)
-                        _infoCard('Network', details.channel.network!),
-                      if (details.channel.categories != null)
+                      SizedBox(height: 16),
+                      _infoCard('Country', d.channel.country),
+                      if (d.channel.network != null)
+                        _infoCard('Network', d.channel.network!),
+                      if (d.channel.categories != null)
                         _infoCard(
                           'Categories',
-                          details.channel.categories!.join(', '),
+                          d.channel.categories!.join(', '),
                         ),
                       _infoCard(
                         'Status',
-                        details.channel.isActive ? 'Active' : 'Inactive',
+                        d.channel.isActive ? 'Active' : 'Inactive',
                       ),
-                      _infoCard('Streams', '${details.streams.length}'),
-                      _infoCard('Feeds', '${details.feeds.length}'),
-                      _infoCard('Guides', '${details.guides.length}'),
-                      const SizedBox(height: 16),
+                      _infoCard('Streams', '${d.streams.length}'),
+                      _infoCard('Feeds', '${d.feeds.length}'),
+                      _infoCard('Guides', '${d.guides.length}'),
+                      SizedBox(height: 16),
                     ],
                   ),
                 ),
@@ -740,53 +555,28 @@ class _ChannelPlayerScreenState extends ConsumerState<ChannelPlayerScreen> {
     );
   }
 
-  /// A little helper to render a label/value pair inside a Card.
-  Widget _infoCard(String label, String value) {
-    return Card(
-      color: AppColors.cardBackground,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$label:',
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                value,
-                style: const TextStyle(color: AppColors.textPrimary),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+  Widget _infoCard(String label, String value) => Card(
+    color: AppColors.cardBackground,
+    margin: EdgeInsets.symmetric(vertical: 6),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: Padding(
+      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+          Text(
+            '$label:',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          Expanded(child: Text(value)),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(value, style: TextStyle(color: AppColors.textPrimary)),
+          ),
         ],
       ),
-    );
-  }
+    ),
+  );
 }
